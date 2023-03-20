@@ -73,6 +73,7 @@ class Simulator(object):
         return cls(wsize, config)
 
     def __call__(self, executable, *flat_args):
+        # 数据加密（转成分享态）
         flat_args = [np.array(jnp.array(x)) for x in flat_args]
         params = [
             self.io.make_shares(x, spu_pb2.Visibility.VIS_SECRET) for x in flat_args
@@ -104,6 +105,7 @@ class Simulator(object):
             # do outfeed
             return [rt.get_var(name) for name in executable.output_names]
 
+        # 多线程并发，内存启动brpc link、实例化spu Runtime、输入秘密份额（绑定入参）、执行代码、输出出参
         jobs = [
             PropagatingThread(target=wrapper, args=(rank,))
             for rank in range(self.wsize)
@@ -115,7 +117,7 @@ class Simulator(object):
         outputs = zip(*parties)
         return [self.io.reconstruct(out) for out in outputs]
 
-
+# 只是Decorates/装饰函数而已，并没有执行实际的内容，只有调用了函数，才会真正编译并执行
 def sim_jax(
     sim: Simulator,
     fun: Callable,
@@ -138,17 +140,20 @@ def sim_jax(
     """
 
     def wrapper(*args, **kwargs):
+        # 数据参数 识别 & 展开
         _, dyn_args = japi_util.argnums_partial_except(
             jax_lu.wrap_init(fun), static_argnums, args, allow_invalid=False
         )
         args_flat, _ = jax.tree_util.tree_flatten((dyn_args, kwargs))
 
+        # 数据参数名 & 可见性
         in_names = [f'in{idx}' for idx in range(len(args_flat))]
         in_vis = [spu_pb2.Visibility.VIS_SECRET] * len(args_flat)
 
         def outputNameGen(out_flat):
             return [f'out{idx}' for idx in range(len(out_flat))]
 
+        # 编译返回HHPLO IR和出参结构
         executable, output = spu_fe.compile(
             spu_fe.Kind.JAX,
             fun,
@@ -161,6 +166,7 @@ def sim_jax(
         )
 
         wrapper.pphlo = executable.code.decode("utf-8")
+        print(f'pphlo = \n{wrapper.pphlo}')
 
         out_flat = sim(executable, *args_flat)
 

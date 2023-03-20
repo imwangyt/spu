@@ -38,13 +38,10 @@ namespace {
 
 using DurationMillis = std::chrono::duration<double, std::milli>;
 
+//随机生成发送方数据时，开始插入接收方数据的位置
 constexpr size_t kPsiStartPos = 100;
-struct TestParams {
-  size_t nr;
-  size_t ns;
-  size_t label_bytes;
-};
 
+//随机生成指定数量的string，每个string长度为16 chars = 128 bits
 std::vector<std::string> GenerateData(size_t seed, size_t item_count) {
   yacl::crypto::Prg<uint128_t> prg(seed);
 
@@ -59,6 +56,7 @@ std::vector<std::string> GenerateData(size_t seed, size_t item_count) {
   return items;
 }
 
+//随机生成发送方（数据库）数据，并插入接收方数据，记录交集位置
 std::vector<apsi::Item> GenerateSenderData(
     size_t seed, size_t item_count,
     const absl::Span<std::string> &receiver_items,
@@ -67,12 +65,14 @@ std::vector<apsi::Item> GenerateSenderData(
 
   yacl::crypto::Prg<uint128_t> prg(seed);
 
+  //随机生成数据库记录
   for (size_t i = 0; i < item_count; ++i) {
     apsi::Item::value_type value{};
     prg.Fill(absl::MakeSpan(value));
     sender_items.emplace_back(value);
   }
 
+  //插入接收方数据，收集位置
   for (size_t i = 0; i < receiver_items.size(); i += 3) {
     apsi::Item::value_type value{};
     std::memcpy(value.data(), receiver_items[i].data(),
@@ -85,6 +85,7 @@ std::vector<apsi::Item> GenerateSenderData(
   return sender_items;
 }
 
+// 随机生成发送方数据（带标签），并插入接收方数据，记录交集位置和标签
 std::vector<std::pair<apsi::Item, apsi::Label>> GenerateSenderData(
     size_t seed, size_t item_count, size_t label_byte_count,
     const absl::Span<std::string> &receiver_items,
@@ -94,6 +95,7 @@ std::vector<std::pair<apsi::Item, apsi::Label>> GenerateSenderData(
 
   yacl::crypto::Prg<uint128_t> prg(seed);
 
+  // 随机生成数据库记录
   for (size_t i = 0; i < item_count; ++i) {
     apsi::Item item;
     apsi::Label label;
@@ -103,6 +105,7 @@ std::vector<std::pair<apsi::Item, apsi::Label>> GenerateSenderData(
     sender_items.emplace_back(item, label);
   }
 
+  //插入接收方数据，收集位置和标签
   for (size_t i = 0; i < receiver_items.size(); i += 3) {
     apsi::Item item;
     std::memcpy(item.value().data(), receiver_items[i].data(),
@@ -123,17 +126,28 @@ std::vector<std::pair<apsi::Item, apsi::Label>> GenerateSenderData(
 
 }  // namespace
 
+// gtest测试参数
+struct TestParams {
+  size_t nr;
+  size_t ns;
+  size_t label_bytes;
+};
 class LabelPsiTest : public testing::TestWithParam<TestParams> {};
 
 TEST_P(LabelPsiTest, Works) {
   auto params = GetParam();
+
+  // 建立brpc 2pc网络
   auto ctxs = yacl::link::test::SetupWorld(2);
+
   apsi::PSIParams psi_params = spu::psi::GetPsiParams(params.nr, params.ns);
 
   // step 1: PsiParams Request and Response
+  // 1-1: Sender监听接收请求、根据两边的数据集数量生成合适的PsiParams
   std::future<void> f_sender_params = std::async(
       [&] { return LabelPsiSender::RunPsiParams(params.ns, ctxs[0]); });
 
+  // 1-2: Receiver send request & Process response
   std::future<apsi::PSIParams> f_receiver_params = std::async(
       [&] { return LabelPsiReceiver::RequestPsiParams(params.nr, ctxs[1]); });
 
