@@ -21,16 +21,17 @@
 
 #include "libspu/kernel/hal/constants.h"
 #include "libspu/kernel/hal/polymorphic.h"
-#include "libspu/kernel/hal/test_util.h"
+#include "libspu/kernel/hal/type_cast.h"
+#include "libspu/kernel/test_util.h"
 
 namespace spu::kernel::hlo {
 
 TEST(SortTest, Simple) {
-  HalContext ctx = hal::test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
   xt::xarray<float> x = {{0.05, 0.5, 0.24}, {5, 50, 2}};
   xt::xarray<float> sorted_x = {{0.05, 0.24, 0.5}, {2, 5, 50}};
 
-  Value x_v = hal::test::makeValue(&ctx, x, VIS_SECRET);
+  Value x_v = test::makeValue(&ctx, x, VIS_SECRET);
 
   std::vector<spu::Value> rets = Sort(
       &ctx, {x_v}, 1, false,
@@ -42,7 +43,7 @@ TEST(SortTest, Simple) {
   EXPECT_EQ(rets.size(), 1);
 
   auto sorted_x_hat =
-      hal::dump_public_as<float>(&ctx, hal::_s2p(&ctx, rets[0]).asFxp());
+      hal::dump_public_as<float>(&ctx, hal::reveal(&ctx, rets[0]));
 
   EXPECT_TRUE(xt::allclose(sorted_x, sorted_x_hat, 0.01, 0.001))
       << sorted_x << std::endl
@@ -50,11 +51,11 @@ TEST(SortTest, Simple) {
 }
 
 TEST(SortTest, SimpleWithNoPadding) {
-  HalContext ctx = hal::test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
   xt::xarray<float> x = {{0.05, 0.5, 0.24, 0.5}, {2, 5, 50, 2}};
   xt::xarray<float> sorted_x = {{0.05, 0.24, 0.5, 0.5}, {2, 2, 5, 50}};
 
-  Value x_v = hal::test::makeValue(&ctx, x, VIS_SECRET);
+  Value x_v = test::makeValue(&ctx, x, VIS_SECRET);
 
   std::vector<spu::Value> rets = Sort(
       &ctx, {x_v}, 1, false,
@@ -66,7 +67,7 @@ TEST(SortTest, SimpleWithNoPadding) {
   EXPECT_EQ(rets.size(), 1);
 
   auto sorted_x_hat =
-      hal::dump_public_as<float>(&ctx, hal::_s2p(&ctx, rets[0]).asFxp());
+      hal::dump_public_as<float>(&ctx, hal::reveal(&ctx, rets[0]));
 
   EXPECT_TRUE(xt::allclose(sorted_x, sorted_x_hat, 0.01, 0.001))
       << sorted_x << std::endl
@@ -74,14 +75,14 @@ TEST(SortTest, SimpleWithNoPadding) {
 }
 
 TEST(SortTest, MultiInputs) {
-  HalContext ctx = hal::test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
   xt::xarray<float> x1 = {{0.5, 0.05, 0.5, 0.24, 0.5, 0.5, 0.5}};
   xt::xarray<float> x2 = {{5, 1, 2, 1, 2, 3, 4}};
   xt::xarray<float> sorted_x1 = {{0.05, 0.24, 0.5, 0.5, 0.5, 0.5, 0.5}};
   xt::xarray<float> sorted_x2 = {{1, 1, 2, 2, 3, 4, 5}};
 
-  Value x1_v = hal::test::makeValue(&ctx, x1, VIS_SECRET);
-  Value x2_v = hal::test::makeValue(&ctx, x2, VIS_SECRET);
+  Value x1_v = test::makeValue(&ctx, x1, VIS_SECRET);
+  Value x2_v = test::makeValue(&ctx, x2, VIS_SECRET);
 
   std::vector<spu::Value> rets = Sort(
       &ctx, {x1_v, x2_v}, 1, false,
@@ -93,15 +94,15 @@ TEST(SortTest, MultiInputs) {
   EXPECT_EQ(rets.size(), 2);
 
   auto sorted_x1_hat =
-      hal::dump_public_as<float>(&ctx, hal::_s2p(&ctx, rets[0]).asFxp());
+      hal::dump_public_as<float>(&ctx, hal::reveal(&ctx, rets[0]));
 
   EXPECT_TRUE(xt::allclose(sorted_x1, sorted_x1_hat, 0.01, 0.001))
       << sorted_x1 << std::endl
       << sorted_x1_hat << std::endl;
 
   // NOTE: Secret sort is unstable, so rets[1] need to be sort before check.
-  auto sorted_x2_hat = xt::sort(
-      hal::dump_public_as<float>(&ctx, hal::_s2p(&ctx, rets[1]).asFxp()));
+  auto sorted_x2_hat =
+      xt::sort(hal::dump_public_as<float>(&ctx, hal::reveal(&ctx, rets[1])));
 
   EXPECT_TRUE(xt::allclose(sorted_x2, sorted_x2_hat, 0.01, 0.001))
       << sorted_x2 << std::endl
@@ -109,15 +110,15 @@ TEST(SortTest, MultiInputs) {
 }
 
 TEST(SortTest, MultiOperands) {
-  HalContext ctx = hal::test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
   xt::xarray<float> k1 = {6, 6, 3, 4, 4, 5, 4};
   xt::xarray<float> k2 = {0.5, 0.1, 3.1, 6.5, 4.1, 6.7, 2.5};
 
   xt::xarray<float> sorted_k1 = {3, 4, 4, 4, 5, 6, 6};
   xt::xarray<float> sorted_k2 = {3.1, 2.5, 4.1, 6.5, 6.7, 0.1, 0.5};
 
-  Value k1_v = hal::test::makeValue(&ctx, k1, VIS_SECRET);
-  Value k2_v = hal::test::makeValue(&ctx, k2, VIS_SECRET);
+  Value k1_v = test::makeValue(&ctx, k1, VIS_SECRET);
+  Value k2_v = test::makeValue(&ctx, k2, VIS_SECRET);
 
   std::vector<spu::Value> rets = Sort(
       &ctx, {k1_v, k2_v}, 0, false,
@@ -133,9 +134,9 @@ TEST(SortTest, MultiOperands) {
   EXPECT_EQ(rets.size(), 2);
 
   auto sorted_k1_hat =
-      hal::dump_public_as<float>(&ctx, hal::_s2p(&ctx, rets[0]).asFxp());
+      hal::dump_public_as<float>(&ctx, hal::reveal(&ctx, rets[0]));
   auto sorted_k2_hat =
-      hal::dump_public_as<float>(&ctx, hal::_s2p(&ctx, rets[1]).asFxp());
+      hal::dump_public_as<float>(&ctx, hal::reveal(&ctx, rets[1]));
 
   EXPECT_TRUE(xt::allclose(sorted_k1, sorted_k1_hat, 0.01, 0.001))
       << sorted_k1 << std::endl

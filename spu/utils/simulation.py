@@ -122,7 +122,7 @@ def sim_jax(
     sim: Simulator,
     fun: Callable,
     static_argnums=(),
-    inline: bool = False,
+    copts=spu_pb2.CompilerOptions(),
 ):
     """
     Decorates a jax numpy fn that simulated on SPU.
@@ -148,7 +148,6 @@ def sim_jax(
 
         # 数据参数名 & 可见性
         in_names = [f'in{idx}' for idx in range(len(args_flat))]
-        in_vis = [spu_pb2.Visibility.VIS_SECRET] * len(args_flat)
 
         def outputNameGen(out_flat):
             return [f'out{idx}' for idx in range(len(out_flat))]
@@ -160,9 +159,10 @@ def sim_jax(
             args,
             kwargs,
             in_names,
-            in_vis,
+            [spu_pb2.Visibility.VIS_SECRET] * len(args_flat),
             outputNameGen,
             static_argnums=static_argnums,
+            copts=copts,
         )
 
         wrapper.pphlo = executable.code.decode("utf-8")

@@ -31,7 +31,7 @@ class CommonTypeB : public Kernel {
   void evaluate(KernelEvalContext* ctx) const override;
 };
 
-class CastTypeB : public Kernel {
+class CastTypeB : public CastTypeKernel {
  public:
   static constexpr char kBindName[] = "cast_type_b";
 
@@ -39,7 +39,8 @@ class CastTypeB : public Kernel {
 
   ce::CExpr comm() const override { return ce::Const(0); }
 
-  void evaluate(KernelEvalContext* ctx) const override;
+  ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                const Type& to_type) const override;
 };
 
 class B2P : public UnaryKernel {
@@ -68,6 +69,24 @@ class P2B : public UnaryKernel {
   ce::CExpr comm() const override { return ce::Const(0); }
 
   ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in) const override;
+};
+
+class B2V : public RevealToKernel {
+ public:
+  static constexpr char kBindName[] = "b2v";
+
+  ce::CExpr latency() const override {
+    // 1 * send/recv: 1
+    return ce::Const(1);
+  }
+
+  ce::CExpr comm() const override {
+    // 1 * rotate: k
+    return ce::K();
+  }
+
+  ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                size_t rank) const override;
 };
 
 class AndBP : public BinaryKernel {
@@ -172,7 +191,7 @@ class BitrevB : public BitrevKernel {
                 size_t end) const override;
 };
 
-class BitIntlB : public Kernel {
+class BitIntlB : public BitSplitKernel {
  public:
   static constexpr char kBindName[] = "bitintl_b";
 
@@ -180,10 +199,11 @@ class BitIntlB : public Kernel {
 
   ce::CExpr comm() const override { return ce::Const(0); }
 
-  void evaluate(KernelEvalContext* ctx) const override;
+  ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                size_t stride) const override;
 };
 
-class BitDeintlB : public Kernel {
+class BitDeintlB : public BitSplitKernel {
  public:
   static constexpr char kBindName[] = "bitdeintl_b";
 
@@ -191,7 +211,8 @@ class BitDeintlB : public Kernel {
 
   ce::CExpr comm() const override { return ce::Const(0); }
 
-  void evaluate(KernelEvalContext* ctx) const override;
+  ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                size_t stride) const override;
 };
 
 }  // namespace spu::mpc::aby3

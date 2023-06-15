@@ -38,7 +38,7 @@ size_t defaultFxpBits(FieldType field) {
 
 }  // namespace
 
-void populateRuntimecConfig(RuntimeConfig& cfg) {
+void populateRuntimeConfig(RuntimeConfig& cfg) {
   // mandatory fields.
   SPU_ENFORCE(cfg.protocol() != ProtocolKind::PROT_INVALID);
   SPU_ENFORCE(cfg.field() != FieldType::FT_INVALID);
@@ -79,13 +79,16 @@ void populateRuntimecConfig(RuntimeConfig& cfg) {
   }
 
   if (cfg.sigmoid_mode() == RuntimeConfig::SIGMOID_DEFAULT) {
-    cfg.set_sigmoid_mode(RuntimeConfig::SIGMOID_MM1);
+    cfg.set_sigmoid_mode(RuntimeConfig::SIGMOID_REAL);
   }
+
+  // MPC related configurations
+  // trunc_allow_msb_error           // by pass.
 }
 
 RuntimeConfig makeFullRuntimeConfig(const RuntimeConfig& cfg) {
   RuntimeConfig copy(cfg);
-  populateRuntimecConfig(copy);
+  populateRuntimeConfig(copy);
   return copy;
 }
 

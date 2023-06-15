@@ -70,7 +70,7 @@ std::vector<std::string> CreateSampleDataset(uint32_t data_size,
 size_t CheckPsiSize(const std::vector<std::string>& data_set) {
   size_t flow_prefix_size = 0;
   size_t compare_length = kDataSetPrefix[1].length();
-  for (auto& item : data_set) {
+  for (const auto& item : data_set) {
     if (item.compare(0, compare_length, kDataSetPrefix[1]) == 0) {
       flow_prefix_size++;
     }
@@ -83,13 +83,13 @@ size_t CheckPsiSize(const std::vector<std::string>& data_set) {
 int main(int argc, char** argv) {
   llvm::cl::ParseCommandLineOptions(argc, argv);
 
-  auto hctx = MakeHalContext();
+  auto sctx = MakeSPUContext();
 
   std::vector<std::string> data_set =
       CreateSampleDataset(DataSize.getValue(), Rank.getValue());
 
   std::vector<std::string> intersection =
-      spu::psi::RunEcdhPsi(hctx->lctx(), data_set, yacl::link::kAllRank);
+      spu::psi::RunEcdhPsi(sctx->lctx(), data_set, yacl::link::kAllRank);
 
   // output intersection size
   // psi result size is nearly 70% of the data_size

@@ -17,23 +17,24 @@ load("//bazel:spu.bzl", "spu_cc_library", "spu_cc_test")
 package(default_visibility = ["//visibility:public"])
 
 spu_cc_library(
-    name = "pub2k",
-    srcs = ["pub2k.cc"],
-    hdrs = ["pub2k.h"],
+    name = "pv2k",
+    srcs = ["pv2k.cc"],
+    hdrs = ["pv2k.h"],
     deps = [
         "//libspu/core",
         "//libspu/core:trace",
         "//libspu/mpc:kernel",
+        "//libspu/mpc/common:communicator",
         "//libspu/mpc/common:prg_state",
         "//libspu/mpc/utils:ring_ops",
     ],
 )
 
 spu_cc_test(
-    name = "pub2k_test",
-    srcs = ["pub2k_test.cc"],
+    name = "pv2k_test",
+    srcs = ["pv2k_test.cc"],
     deps = [
-        ":pub2k",
+        ":pv2k",
     ],
 )
 
@@ -42,7 +43,7 @@ spu_cc_library(
     srcs = ["communicator.cc"],
     hdrs = ["communicator.h"],
     deps = [
-        "//libspu/mpc:object",
+        "//libspu/core:object",
         "//libspu/mpc/utils:ring_ops",
         "@yacl//yacl/link",
     ],
@@ -63,8 +64,8 @@ spu_cc_library(
     hdrs = ["prg_state.h"],
     deps = [
         "//libspu/core",
+        "//libspu/core:object",
         "//libspu/mpc:kernel",
-        "//libspu/mpc:object",
         "@yacl//yacl/crypto/tools:prg",
         "@yacl//yacl/crypto/utils:rand",
         "@yacl//yacl/link",
@@ -78,55 +79,6 @@ spu_cc_test(
         ":prg_state",
         "//libspu/mpc/utils:simulate",
     ],
-)
-
-spu_cc_library(
-    name = "ab_kernels",
-    srcs = ["ab_kernels.cc"],
-    hdrs = ["ab_kernels.h"],
-    deps = [
-        ":ab_api",
-        "//libspu/core:vectorize",
-        "//libspu/mpc:object",
-    ],
-)
-
-spu_cc_library(
-    name = "ab_api",
-    srcs = ["ab_api.cc"],
-    hdrs = ["ab_api.h"],
-    deps = [
-        ":pub2k",
-        "//libspu/core:vectorize",
-        "//libspu/mpc:api",
-        "//libspu/mpc:object",
-    ],
-)
-
-spu_cc_library(
-    name = "api_test_params",
-    hdrs = ["api_test_params.h"],
-    deps = [
-        "//libspu/mpc:object",
-        "@yacl//yacl/link",
-    ],
-)
-
-spu_cc_library(
-    name = "ab_api_test",
-    testonly = 1,
-    srcs = ["ab_api_test.cc"],
-    hdrs = ["ab_api_test.h"],
-    deps = [
-        ":ab_api",
-        ":api_test_params",
-        ":pub2k",
-        "//libspu/mpc:object",
-        "//libspu/mpc/common:communicator",
-        "//libspu/mpc/utils:simulate",
-        "@com_google_googletest//:gtest",
-    ],
-    alwayslink = True,
 )
 
 spu_cc_library(

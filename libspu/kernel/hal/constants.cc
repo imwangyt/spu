@@ -21,7 +21,7 @@
 #include "libspu/core/type_util.h"
 #include "libspu/kernel/hal/prot_wrapper.h"
 #include "libspu/kernel/hal/ring.h"
-#include "libspu/mpc/common/pub2k.h"
+#include "libspu/mpc/common/pv2k.h"
 
 namespace spu::kernel::hal {
 namespace {
@@ -29,7 +29,7 @@ namespace {
 // make a public typed value.
 //
 // FIXME: this is a abstraction leakage, we should NOT invoke Pub2kTy directly.
-Value make_pub2k(HalContext* ctx, const PtBufferView& bv) {
+Value make_pub2k(SPUContext* ctx, const PtBufferView& bv) {
   SPU_TRACE_HAL_DISP(ctx, bv);
 
   NdArrayRef raw = convertToNdArray(bv);
@@ -46,19 +46,20 @@ Value make_pub2k(HalContext* ctx, const PtBufferView& bv) {
 // TODO: formalize and test it.
 // clang-format off
 // NOLINTBEGIN, readability-implicit-bool-conversion, modernize-use-bool-literals
-bool kCastFlags[DT_FXP+1][DT_FXP+1] = { 
-//{_,  I1, I8, U8, I16,U16,I32,U32,I64,U64,FXP}
-  {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0  },  // _
-  {0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  0  },  // I1
-  {0,  0,  1,  0,  1,  0,  1,  0,  1,  0,  0  },  // I8
-  {0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  0  },  // U8
-  {0,  0,  0,  0,  1,  0,  1,  0,  1,  0,  0  },  // I16
-  {0,  0,  0,  0,  1,  1,  1,  1,  1,  1,  0  },  // U16
-  {0,  0,  0,  0,  0,  0,  1,  0,  1,  0,  0  },  // I32
-  {0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  0  },  // U32
-  {0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0  },  // I64
-  {0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  0  },  // U64
-  {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1  },  // FXP
+bool kCastFlags[DT_F64+1][DT_F64+1] = {
+//{_,  I1, I8, U8, I16,U16,I32,U32,I64,U64,F32,F64}
+  {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0  , 0},  // _
+  {0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  0  , 0},  // I1
+  {0,  0,  1,  0,  1,  0,  1,  0,  1,  0,  0  , 0},  // I8
+  {0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  0  , 0},  // U8
+  {0,  0,  0,  0,  1,  0,  1,  0,  1,  0,  0  , 0},  // I16
+  {0,  0,  0,  0,  1,  1,  1,  1,  1,  1,  0  , 0},  // U16
+  {0,  0,  0,  0,  0,  0,  1,  0,  1,  0,  0  , 0},  // I32
+  {0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  0  , 0},  // U32
+  {0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0  , 0},  // I64
+  {0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  0  , 0},  // U64
+  {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1  , 1},  // F32
+  {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0  , 1},  // F64
 };
 // NOLINTEND
 // clang-format on
@@ -69,7 +70,7 @@ bool canImplicitCastTo(DataType frm, DataType to) {
 
 }  // namespace
 
-Value constant(HalContext* ctx, PtBufferView init, DataType dtype,
+Value constant(SPUContext* ctx, PtBufferView init, DataType dtype,
                ShapeView shape) {
   SPU_TRACE_HAL_DISP(ctx, init, dtype, shape);
 
@@ -102,16 +103,16 @@ Value constant(HalContext* ctx, PtBufferView init, DataType dtype,
   return Value(result.data().broadcast_to(shape, {}), result.dtype());
 }
 
-spu::Value zeros(HalContext* ctx, DataType dtype,
+spu::Value zeros(SPUContext* ctx, DataType dtype,
                  absl::Span<const int64_t> shape) {
-  if (dtype == DT_FXP) {
-    return constant(ctx, 0.0, DT_FXP, shape);
+  if (dtype == DT_F32 || dtype == DT_F64) {
+    return constant(ctx, 0.0F, dtype, shape);
   } else {
     return constant(ctx, static_cast<uint8_t>(0), dtype, shape);
   }
 }
 
-Value iota(HalContext* ctx, DataType dtype, int64_t numel) {
+Value iota(SPUContext* ctx, DataType dtype, int64_t numel) {
   return DISPATCH_ALL_NONE_BOOL_PT_TYPES(getDecodeType(dtype), "iota", [&]() {
     std::vector<ScalarT> arr(numel);
     std::iota(arr.begin(), arr.end(), 0);
@@ -119,8 +120,9 @@ Value iota(HalContext* ctx, DataType dtype, int64_t numel) {
   });
 }
 
-Value epsilon(HalContext* ctx, absl::Span<const int64_t> shape) {
-  return _constant(ctx, static_cast<int128_t>(1), shape).asFxp();
+Value epsilon(SPUContext* ctx, DataType dtype,
+              absl::Span<const int64_t> shape) {
+  return _constant(ctx, static_cast<int128_t>(1), shape).setDtype(dtype);
 }
 
 }  // namespace spu::kernel::hal

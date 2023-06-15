@@ -16,11 +16,11 @@
 
 #include "libspu/core/encoding.h"
 #include "libspu/core/ndarray_ref.h"
-#include "libspu/mpc/common/pub2k.h"
+#include "libspu/mpc/common/pv2k.h"
 
 namespace spu::kernel::hal {
 
-NdArrayRef dump_public(HalContext* ctx, const Value& v) {
+NdArrayRef dump_public(SPUContext* ctx, const Value& v) {
   SPU_TRACE_HAL_DISP(ctx, v);
   SPU_ENFORCE(v.storage_type().isa<mpc::Pub2kTy>(), "got {}", v.storage_type());
   const auto field = v.storage_type().as<Ring2k>()->field();

@@ -23,8 +23,7 @@ def HloLegalizeToPPHloPass : Pass<"hlo-legalize-to-pphlo", "ModuleOp"> {
   let constructor = "createLegalizeToPPHloPass()";
   let dependentDialects = ["pphlo::PPHloDialect"];
   let options = [
-    Option<"io_visibility_json_", "io-visibility-json", "std::string", "",
-           "io visibility of this module">,
+    ListOption<"input_vis_list_", "input_vis_list", "std::string", "input visibilities to entry point function">,
   ];
 }
 
@@ -85,5 +84,11 @@ def RewriteDivSqrtPatterns: Pass<"rewrite-div-sqrt-pattern", "func::FuncOp"> {
 def ExpandSecretGather: Pass<"expand-secret-gather", "func::FuncOp"> {
   let summary = "Rewrite Gather with secret indexing to loop with DynamicUpdateSlice";
   let constructor = "createExpandSecretGatherPass()";
+  let dependentDialects = ["pphlo::PPHloDialect"];
+}
+
+def OptimizeDenominatorWithBcast: Pass<"optimize-denominator-with-broadcast", "func::FuncOp"> {
+  let summary = "Optimize x/broadcast(y) into x*broadcast(1/y)";
+  let constructor = "createOptimizeDenominatorWithBroadcast()";
   let dependentDialects = ["pphlo::PPHloDialect"];
 }

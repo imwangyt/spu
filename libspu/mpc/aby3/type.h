@@ -15,7 +15,6 @@
 #pragma once
 
 #include "libspu/core/type.h"
-#include "libspu/mpc/object.h"
 
 namespace spu::mpc::aby3 {
 
@@ -26,10 +25,7 @@ class AShrTy : public TypeImpl<AShrTy, RingTy, Secret, AShare> {
   using Base::Base;
   static std::string_view getStaticId() { return "aby3.AShr"; }
 
-  explicit AShrTy(FieldType field, int owner_rank = -1) {
-    field_ = field;
-    owner_ = owner_rank;
-  }
+  explicit AShrTy(FieldType field) { field_ = field; }
 
   size_t size() const override { return SizeOf(GetStorageType(field_)) * 2; }
 };

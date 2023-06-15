@@ -17,7 +17,7 @@
 // > bazel build //examples/cpp/pir:keyword_pir_client -c opt
 //
 // To run the example, start terminals:
-// > ./keyword_pir_client -rank 1 -in_path ../../data/psi_client_data.csv.csv 
+// > ./keyword_pir_client -rank 1 -in_path ../../data/psi_client_data.csv.csv
 // >       -key_columns id -out_path pir_out.csv
 // clang-format on
 
@@ -58,8 +58,8 @@ constexpr uint32_t kLinkRecvTimeout = 30 * 60 * 1000;
 int main(int argc, char **argv) {
   llvm::cl::ParseCommandLineOptions(argc, argv);
 
-  auto hctx = MakeHalContext();
-  auto link_ctx = hctx->lctx();
+  auto sctx = MakeSPUContext();
+  auto link_ctx = sctx->lctx();
 
   link_ctx->SetRecvTimeout(kLinkRecvTimeout);
 

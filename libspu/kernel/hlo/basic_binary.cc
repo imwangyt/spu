@@ -15,13 +15,14 @@
 #include "libspu/kernel/hlo/basic_binary.h"
 
 #include "libspu/kernel/hal/constants.h"
+#include "libspu/kernel/hal/debug.h"
 #include "libspu/kernel/hal/polymorphic.h"
 #include "libspu/kernel/hal/type_cast.h"
 
 namespace spu::kernel::hlo {
 
 #define SIMPLE_BINARY_KERNEL_DEFN(NAME, HalFcn)           \
-  spu::Value NAME(HalContext *ctx, const spu::Value &lhs, \
+  spu::Value NAME(SPUContext *ctx, const spu::Value &lhs, \
                   const spu::Value &rhs) {                \
     return HalFcn(ctx, lhs, rhs);                         \
   }
@@ -45,7 +46,7 @@ SIMPLE_BINARY_KERNEL_DEFN(GreaterEqual, hal::greater_equal)
 
 #undef SIMPLE_BINARY_KERNEL_DEFN
 
-spu::Value Remainder(HalContext *ctx, const spu::Value &lhs,
+spu::Value Remainder(SPUContext *ctx, const spu::Value &lhs,
                      const spu::Value &rhs) {
   SPU_ENFORCE(lhs.dtype() == rhs.dtype(), "dtype mismatch {} != {}",
               lhs.dtype(), rhs.dtype());
@@ -64,7 +65,7 @@ spu::Value Remainder(HalContext *ctx, const spu::Value &lhs,
   return hal::sub(ctx, lhs, hal::mul(ctx, quotient, rhs));
 }
 
-spu::Value Dot(HalContext *ctx, const spu::Value &lhs, const spu::Value &rhs) {
+spu::Value Dot(SPUContext *ctx, const spu::Value &lhs, const spu::Value &rhs) {
   SPU_ENFORCE(!lhs.shape().empty() && lhs.shape().size() <= 2);
   SPU_ENFORCE(!rhs.shape().empty() && rhs.shape().size() <= 2);
 

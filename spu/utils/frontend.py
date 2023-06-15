@@ -12,30 +12,65 @@
 # See the License for the specific language governing permissions and
 
 import functools
-import cloudpickle
-
-from enum import Enum
-from typing import Callable, Dict, List
 import warnings
+from enum import Enum
+from typing import Callable, Dict, Iterable, List
 
+import cloudpickle
 from cachetools import LRUCache, cached
 
 from .. import api as spu_api
 from .. import spu_pb2
 
 
-def _jax_compilation_key(fn: Callable, static_argnums, args: List, kwargs: Dict):
+def _jax_compilation_key(
+    fn: Callable, static_argnums, static_argnames, args: List, kwargs: Dict
+):
     import jax
 
     flat_args, _ = jax.tree_util.tree_flatten((args, kwargs))
     types = [(a.dtype, a.shape) if hasattr(a, 'dtype') else type(a) for a in flat_args]
-    hash_str = f'{hash(cloudpickle.dumps(fn))}-{static_argnums}-{types}'
+    hash_str = (
+        f'{hash(cloudpickle.dumps(fn))}-{static_argnums}-{static_argnames}-{types}'
+    )
     return hash_str
 
 
+def _argnames_partial_except(fn, static_argnames, kwargs):
+    if static_argnames is None:
+        return fn, kwargs
+
+    assert isinstance(
+        static_argnames, (str, Iterable)
+    ), f'type of static_argnames is {type(static_argnames)} while str or Iterable is required here.'
+    if isinstance(static_argnames, str):
+        static_argnames = (static_argnames,)
+
+    static_kwargs = {k: kwargs.pop(k) for k in static_argnames if k in kwargs}
+    return functools.partial(fn, **static_kwargs), kwargs
+
+
+def _argnames_partial_except(fn, static_argnames, kwargs):
+    if static_argnames is None:
+        return fn, kwargs
+
+    assert isinstance(
+        static_argnames, (str, Iterable)
+    ), f'type of static_argnames is {type(static_argnames)} while str or Iterable is required here.'
+    if isinstance(static_argnames, str):
+        static_argnames = (static_argnames,)
+
+    static_kwargs = {k: kwargs.pop(k) for k in static_argnames if k in kwargs}
+    return functools.partial(fn, **static_kwargs), kwargs
+
+
 @cached(cache=LRUCache(maxsize=128), key=_jax_compilation_key)
-def _jax_compilation(fn: Callable, static_argnums, args: List, kwargs: Dict):
+def _jax_compilation(
+    fn: Callable, static_argnums, static_argnames, args: List, kwargs: Dict
+):
     import jax
+
+    fn, kwargs = _argnames_partial_except(fn, static_argnames, kwargs)
 
     cfn, output = jax.xla_computation(
         fn, return_shape=True, static_argnums=static_argnums, backend="interpreter"
@@ -96,19 +131,23 @@ class Kind(Enum):
 def compile(
     kind: Kind,
     fn: Callable,
-    args: List,
-    kwargs: Dict,
+    m_args: List,
+    m_kwargs: Dict,
     input_names: List[str],
     input_vis: List,
     outputNameGen: Callable,
     static_argnums=(),
+    static_argnames=None,
+    copts=spu_pb2.CompilerOptions(),
 ):
     if kind == Kind.JAX:
         import jax
 
         patches = _patch_jax()
 
-        ir_text, output = _jax_compilation(fn, static_argnums, args, kwargs)
+        ir_text, output = _jax_compilation(
+            fn, static_argnums, static_argnames, m_args, m_kwargs
+        )
 
         _restore_jax_patch(patches)
 
@@ -119,11 +158,11 @@ def compile(
         import tensorflow as tf
 
         tf_fn = tf.function(fn, jit_compile=True, experimental_relax_shapes=True)
-        ir_text = tf_fn.experimental_get_compiler_ir(*args, **kwargs)(
+        ir_text = tf_fn.experimental_get_compiler_ir(*m_args, **m_kwargs)(
             stage="hlo_serialized",
         )
 
-        cf = tf_fn.get_concrete_function(*args, **kwargs)
+        cf = tf_fn.get_concrete_function(*m_args, **m_kwargs)
 
         # TODO(junfeng): support input captures.
         assert (
@@ -143,7 +182,7 @@ def compile(
         ), "currently only torch.nn.Module is supported"
 
         # convert numpy.ndarray to torch tensor as torch_mlir required
-        arg_tensors = [torch.Tensor(arg) for arg in args]
+        arg_tensors = [torch.Tensor(arg) for arg in m_args]
         # get mlir module
         module = torch_mlir.compile(
             fn, arg_tensors, output_type=torch_mlir.OutputType.MHLO
@@ -167,13 +206,16 @@ def compile(
     else:
         raise NameError(f"Unknown frontend type {kind}")
 
+    source = spu_pb2.CompilationSource()
+    source.ir_txt = ir_text
+    source.input_visibility.extend(input_vis)
     if kind in [Kind.JAX, Kind.Tensorflow]:
-        ir_type = "hlo"
+        source.ir_type = spu_pb2.SourceIRType.XLA
         name = fn.func.__name__ if isinstance(fn, functools.partial) else fn.__name__
     elif kind == Kind.Torch:
-        ir_type = "mhlo"
+        source.ir_type = spu_pb2.SourceIRType.MLIR_HLO
         name = repr(fn)
-    mlir = spu_api.compile(ir_text, ir_type, input_vis)
+    mlir = spu_api.compile(source, copts)
     executable = spu_pb2.ExecutableProto(
         name=name,
         input_names=input_names,

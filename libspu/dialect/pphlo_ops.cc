@@ -988,6 +988,62 @@ LogicalResult IotaOp::verify() {
   return success();
 }
 
+LogicalResult SliceOp::verify() {
+  auto rankedTy = getOperand().getType();
+  // slice_i2
+  ShapedType attrTy = getStartIndices().getType();
+  if (attrTy.getRank() != 1) {
+    return emitOpError(
+        llvm::formatv("start_indices has rank {0} instead of required rank 1",
+                      attrTy.getRank()));
+  }
+
+  // slice_c2
+  int64_t rank = rankedTy.getRank();
+  if (attrTy.getNumElements() != rank) {
+    return emitOpError(
+        llvm::formatv("the number of elements in start_indices ({0}) does not "
+                      "match the rank of the operand ({1})",
+                      attrTy.getNumElements(), rank));
+  }
+
+  auto start = getStartIndices().getValues<int64_t>();
+  auto limit = getLimitIndices().getValues<int64_t>();
+  auto strideVals = getStrides().getValues<int64_t>();
+
+  for (int64_t i = 0, e = rank; i != e; i++) {
+    // slice_c3
+    if (start[i] < 0) {
+      return emitOpError(llvm::formatv(
+          "negative start index {0} in dimension {1}", start[i], i));
+    }
+
+    int64_t operandSize = rankedTy.getDimSize(i);
+    // slice_c3
+    if (limit[i] > operandSize) {
+      return emitOpError(llvm::formatv(
+          "limit index {0} is larger than dimension size {1} in dimension {2}",
+          limit[i], operandSize, i));
+    }
+
+    // slice_c3
+    if (start[i] > limit[i]) {
+      return emitOpError(llvm::formatv(
+          "start index {0}  is larger than limit index {1} in dimension {2}",
+          start[i], limit[i], i));
+    }
+
+    // slice_c4
+    if (strideVals[i] <= 0) {
+      return emitOpError(
+          llvm::formatv("stride must be positive but got {0} in dimension {1}",
+                        strideVals[i], i));
+    }
+  }
+
+  return success();
+}
+
 LogicalResult inferDynamicSliceOp(std::optional<Location> location,
                                   Type operandType, TypeRange startIndicesTypes,
                                   DenseIntElementsAttr sliceSizes,
@@ -1620,9 +1676,8 @@ void printWindowAttribute(OpAsmPrinter& p, DenseElementsAttr attribute) {
 
 }  // namespace
 
-void printWindowAttributes(
-    OpAsmPrinter& p, Operation* op,
-    llvm::Optional<DenseIntElementsAttr> window_strides) {
+void printWindowAttributes(OpAsmPrinter& p, Operation* op,
+                           std::optional<DenseIntElementsAttr> window_strides) {
   using PairT = std::pair<DenseElementsAttr, StringRef>;
   std::array<PairT, 1> printed_attributes = {{
       {window_strides ? *window_strides : nullptr, "stride"},
@@ -1646,7 +1701,7 @@ ParseResult parseWindowAttributes(OpAsmParser& parser,
 
   // Helper to parse an array of the form [ e0, e1, .. ]
   auto parse_array = [&](const std::function<ParseResult(void)>& parse_element,
-                         llvm::Optional<size_t> expected_size =
+                         std::optional<size_t> expected_size =
                              std::nullopt) -> ParseResult {
     if (parser.parseLSquare()) {
       return failure();
@@ -1684,8 +1739,8 @@ ParseResult parseWindowAttributes(OpAsmParser& parser,
       return failure();
     }
 
-    // parse the attribute value. We need to support either 1D and Nx2 array of
-    // integers to parse.
+    // parse the attribute value. We need to support either 1D and Nx2 array
+    // of integers to parse.
     llvm::SmallVector<int64_t> values;
     auto int64_parser = [&]() {
       return parser.parseInteger(values.emplace_back(0));

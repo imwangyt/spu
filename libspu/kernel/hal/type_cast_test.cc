@@ -19,7 +19,8 @@
 #include "gtest/gtest.h"
 #include "xtensor/xio.hpp"
 
-#include "libspu/kernel/hal/test_util.h"
+#include "libspu/kernel/hal/constants.h"
+#include "libspu/kernel/test_util.h"
 
 namespace spu::kernel::hal {
 namespace {
@@ -27,12 +28,12 @@ namespace {
 TEST(TypeCastTest, int2fxp) {
   const xt::xarray<int32_t> x = test::xt_random<int32_t>({5, 6});
   auto expected = xt::cast<int32_t>(x);
-  HalContext ctx = test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
 
   {
     Value a = constant(&ctx, x, DT_I32);
-    Value c = dtype_cast(&ctx, a, DT_FXP);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    Value c = dtype_cast(&ctx, a, DT_F32);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
     auto y = dump_public_as<float>(&ctx, c);
     EXPECT_TRUE(xt::allclose(expected, y, 0.1, 0.5)) << x << std::endl
@@ -42,10 +43,10 @@ TEST(TypeCastTest, int2fxp) {
 
   {
     Value a = test::makeValue(&ctx, x, VIS_SECRET);
-    Value c = dtype_cast(&ctx, a, DT_FXP);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    Value c = dtype_cast(&ctx, a, DT_F32);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
-    auto y = dump_public_as<float>(&ctx, _s2p(&ctx, c).asFxp());
+    auto y = dump_public_as<float>(&ctx, _s2p(&ctx, c).setDtype(DT_F32));
     EXPECT_TRUE(xt::allclose(expected, y, 0.1, 0.5)) << x << std::endl
                                                      << expected << std::endl
                                                      << y;
@@ -58,10 +59,10 @@ TEST(TypeCastTest, fxp2int) {
                                {-0.0, -1.0, -5.0, -10.0, -100.0, -1000.0},
                                {-0.1, -0.5, -0.7, -10.1, -10.5, -10.7}};
   auto expected = xt::cast<int32_t>(x);
-  HalContext ctx = test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
 
   {
-    Value a = constant(&ctx, x, DT_FXP);
+    Value a = constant(&ctx, x, DT_F32);
     Value c = dtype_cast(&ctx, a, DT_I32);
     EXPECT_EQ(c.dtype(), DT_I32);
 

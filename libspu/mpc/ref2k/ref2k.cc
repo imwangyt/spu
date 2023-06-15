@@ -18,8 +18,9 @@
 
 #include "libspu/core/trace.h"
 #include "libspu/core/type.h"
+#include "libspu/mpc/common/communicator.h"
 #include "libspu/mpc/common/prg_state.h"
-#include "libspu/mpc/common/pub2k.h"
+#include "libspu/mpc/common/pv2k.h"
 #include "libspu/mpc/kernel.h"
 #include "libspu/mpc/utils/ring_ops.h"
 
@@ -36,7 +37,7 @@ class Ref2kSecrTy : public TypeImpl<Ref2kSecrTy, RingTy, Secret> {
 };
 
 void registerTypes() {
-  regPub2kTypes();
+  regPV2kTypes();
 
   static std::once_flag flag;
   std::call_once(
@@ -60,21 +61,19 @@ class Ref2kCommonTypeS : public Kernel {
   }
 };
 
-class Ref2kCastTypeS : public Kernel {
+class Ref2kCastTypeS : public CastTypeKernel {
  public:
   static constexpr char kBindName[] = "cast_type_s";
 
   Kind kind() const override { return Kind::Dynamic; }
 
-  void evaluate(KernelEvalContext* ctx) const override {
-    const auto& in = ctx->getParam<ArrayRef>(0);
-    const auto& to_type = ctx->getParam<Type>(1);
-
+  ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                const Type& to_type) const override {
     SPU_TRACE_MPC_DISP(ctx, in, to_type);
     SPU_ENFORCE(in.eltype() == to_type,
                 "semi2k always use same bshare type, lhs={}, rhs={}",
                 in.eltype(), to_type);
-    ctx->setOutput(in);
+    return in;
   }
 };
 
@@ -104,7 +103,57 @@ class Ref2kS2P : public UnaryKernel {
   }
 };
 
-class Ref2kRandS : public Kernel {
+class Ref2kS2V : public RevealToKernel {
+ public:
+  static constexpr char kBindName[] = "s2v";
+
+  ce::CExpr latency() const override { return ce::Const(0); }
+
+  ce::CExpr comm() const override { return ce::Const(0); }
+
+  ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                size_t rank) const override {
+    auto* comm = ctx->getState<Communicator>();
+    const auto field = in.eltype().as<Ring2k>()->field();
+    const auto out_ty = makeType<Priv2kTy>(field, rank);
+    if (comm->getRank() == rank) {  // owner
+      return in.as(out_ty);
+    } else {
+      return makeConstantArrayRef(out_ty, in.numel());
+    }
+  }
+};
+
+class Ref2kV2S : public UnaryKernel {
+ public:
+  static constexpr char kBindName[] = "v2s";
+  Kind kind() const override { return Kind::Dynamic; }
+
+  ce::CExpr latency() const override { return ce::Const(0); }
+  ce::CExpr comm() const override { return ce::Const(0); }
+
+  ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in) const override {
+    auto* comm = ctx->getState<Communicator>();
+    const auto field = in.eltype().as<Ring2k>()->field();
+    const size_t owner = in.eltype().as<Priv2kTy>()->owner();
+
+    const auto out_ty = makeType<Ref2kSecrTy>(field);
+    ArrayRef out(out_ty, in.numel());
+    DISPATCH_ALL_FIELDS(field, "v2s", [&]() {
+      std::vector<ring2k_t> _in(in.numel());
+      for (size_t idx = 0; idx < _in.size(); idx++) {
+        _in[idx] = in.at<ring2k_t>(idx);
+      }
+      std::vector<ring2k_t> _out = comm->bcast<ring2k_t>(_in, owner, "v2s");
+      for (size_t idx = 0; idx < _in.size(); idx++) {
+        out.at<ring2k_t>(idx) = _out[idx];
+      }
+    });
+    return out;
+  }
+};
+
+class Ref2kRandS : public RandKernel {
  public:
   static constexpr char kBindName[] = "rand_s";
 
@@ -112,12 +161,7 @@ class Ref2kRandS : public Kernel {
 
   ce::CExpr comm() const override { return ce::Const(0); }
 
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(proc(ctx, ctx->getParam<size_t>(0)));
-  }
-
-  static ArrayRef proc(KernelEvalContext* ctx, size_t size) {
-    SPU_TRACE_MPC_LEAF(ctx, size);
+  ArrayRef proc(KernelEvalContext* ctx, size_t size) const override {
     auto* state = ctx->getState<PrgState>();
     const auto field = ctx->getState<Z2kState>()->getDefaultField();
 
@@ -409,47 +453,57 @@ class Ref2kMsbS : public UnaryKernel {
 
 }  // namespace
 
-std::unique_ptr<Object> makeRef2kProtocol(
-    const RuntimeConfig& conf,
-    const std::shared_ptr<yacl::link::Context>& lctx) {
+void regRef2kProtocol(SPUContext* ctx,
+                      const std::shared_ptr<yacl::link::Context>& lctx) {
   registerTypes();
 
-  auto obj = std::make_unique<Object>("REF2K");
-
   // register random states & kernels.
-  obj->addState<PrgState>();
+  ctx->prot()->addState<PrgState>();
+
+  // add communicator
+  ctx->prot()->addState<Communicator>(lctx);
 
   // add Z2k state.
-  obj->addState<Z2kState>(conf.field());
+  ctx->prot()->addState<Z2kState>(ctx->config().field());
 
   // register public kernels.
-  regPub2kKernels(obj.get());
+  regPV2kKernels(ctx->prot());
 
   // register compute kernels
-  obj->regKernel<Ref2kCommonTypeS>();
-  obj->regKernel<Ref2kCastTypeS>();
-  obj->regKernel<Ref2kP2S>();
-  obj->regKernel<Ref2kS2P>();
-  obj->regKernel<Ref2kNotS>();
-  obj->regKernel<Ref2kAddSS>();
-  obj->regKernel<Ref2kAddSP>();
-  obj->regKernel<Ref2kMulSS>();
-  obj->regKernel<Ref2kMulSP>();
-  obj->regKernel<Ref2kMatMulSS>();
-  obj->regKernel<Ref2kMatMulSP>();
-  obj->regKernel<Ref2kAndSS>();
-  obj->regKernel<Ref2kAndSP>();
-  obj->regKernel<Ref2kXorSS>();
-  obj->regKernel<Ref2kXorSP>();
-  obj->regKernel<Ref2kLShiftS>();
-  obj->regKernel<Ref2kRShiftS>();
-  obj->regKernel<Ref2kBitrevS>();
-  obj->regKernel<Ref2kARShiftS>();
-  obj->regKernel<Ref2kTruncS>();
-  obj->regKernel<Ref2kMsbS>();
-  obj->regKernel<Ref2kRandS>();
+  ctx->prot()->regKernel<Ref2kCommonTypeS>();
+  ctx->prot()->regKernel<Ref2kCastTypeS>();
+  ctx->prot()->regKernel<Ref2kP2S>();
+  ctx->prot()->regKernel<Ref2kS2P>();
+  ctx->prot()->regKernel<Ref2kV2S>();
+  ctx->prot()->regKernel<Ref2kS2V>();
+  ctx->prot()->regKernel<Ref2kNotS>();
+  ctx->prot()->regKernel<Ref2kAddSS>();
+  ctx->prot()->regKernel<Ref2kAddSP>();
+  ctx->prot()->regKernel<Ref2kMulSS>();
+  ctx->prot()->regKernel<Ref2kMulSP>();
+  ctx->prot()->regKernel<Ref2kMatMulSS>();
+  ctx->prot()->regKernel<Ref2kMatMulSP>();
+  ctx->prot()->regKernel<Ref2kAndSS>();
+  ctx->prot()->regKernel<Ref2kAndSP>();
+  ctx->prot()->regKernel<Ref2kXorSS>();
+  ctx->prot()->regKernel<Ref2kXorSP>();
+  ctx->prot()->regKernel<Ref2kLShiftS>();
+  ctx->prot()->regKernel<Ref2kRShiftS>();
+  ctx->prot()->regKernel<Ref2kBitrevS>();
+  ctx->prot()->regKernel<Ref2kARShiftS>();
+  ctx->prot()->regKernel<Ref2kTruncS>();
+  ctx->prot()->regKernel<Ref2kMsbS>();
+  ctx->prot()->regKernel<Ref2kRandS>();
+}
 
-  return obj;
+std::unique_ptr<SPUContext> makeRef2kProtocol(
+    const RuntimeConfig& conf,
+    const std::shared_ptr<yacl::link::Context>& lctx) {
+  auto ctx = std::make_unique<SPUContext>(conf, lctx);
+
+  regRef2kProtocol(ctx.get(), lctx);
+
+  return ctx;
 }
 
 std::vector<ArrayRef> Ref2kIo::toShares(const ArrayRef& raw, Visibility vis,

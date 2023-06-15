@@ -47,14 +47,14 @@ of the new protocols.
 
 Generate protocol object
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Each MPC protocol execution environment is abstracted as a C++ instance of an `Object <https://github.com/secretflow/spu/blob/main/libspu/mpc/object.h>`_ 
-class in SPU. SPU generates an MPC object through a factory function named `CreateCompute <https://github.com/secretflow/spu/blob/main/libspu/mpc/factory.h>`_
+Each MPC protocol execution environment is abstracted as a C++ instance of an `Object <https://github.com/secretflow/spu/blob/main/libspu/core/object.h>`_ 
+class in SPU. SPU generates an MPC object through a factory function named `CreateContext <https://github.com/secretflow/spu/blob/main/libspu/mpc/factory.h>`_
 according to the runtime config. Therefore, protocol developers need to add their functions in **CreateCompute** to generate protocol objects.
 
 .. code-block:: c++
   :caption: CreateCompute function
 
-  std::unique_ptr<Object> Factory::CreateCompute(
+  std::unique_ptr<SPUContext> Factory::CreateContext(
     const RuntimeConfig& conf,
     const std::shared_ptr<yacl::link::Context>& lctx) {
     switch (conf.protocol()) {
@@ -75,7 +75,7 @@ according to the runtime config. Therefore, protocol developers need to add thei
 
 Understand protocol object
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
-SPU protocol `Object <https://github.com/secretflow/spu/blob/main/libspu/mpc/object.h>`_
+SPU protocol `Object <https://github.com/secretflow/spu/blob/main/libspu/core/object.h>`_
 may be the key concept for adding new protocols. Let's take a closer look at its design.
 The goal of Object class is to realize the generalization and flexibility of developing MPC protocols through dynamic binding. 
 An Object instance has a series of kernels and states. A kernel and a state can be regarded as a 
@@ -141,7 +141,7 @@ This function will be called by the factory class described in previous step.
     obj->addState<PrgState>(lctx);
 
     // register public kernels and api kernels
-    regPub2kKernels(obj.get());
+    regPV2kKernels(obj.get());
     regABKernels(obj.get());
 
     // register arithmetic & binary kernels
@@ -165,7 +165,7 @@ Inside the **makeAby3Protocol** function, it does three things.
   pseudorandom number generator for protocol implementation. 
 
 - The third is to register the protocol kernels (functions). We can see that three types of kernels are registered. \
-  The first type is the kernels implemented in the `pub2k.cc <https://github.com/secretflow/spu/blob/main/libspu/mpc/common/pub2k.cc>`_ \
+  The first type is the kernels implemented in the `pv2k.cc <https://github.com/secretflow/spu/blob/main/libspu/mpc/common/pv2k.cc>`_ \
   file, using **Pub2k** as the naming prefix of kernel classes. The second type is the kernels implemented in the \
   `ab_api.cc <https://github.com/secretflow/spu/blob/main/libspu/mpc/common/ab_api.cc>`_ file, using **ABProt** as the \ 
   naming prefix of kernel classes. The third type is implemented in `arithmetic.cc <https://github.com/secretflow/spu/blob/main/libspu/mpc/aby3/arithmetic.cc>`_, \
@@ -193,12 +193,12 @@ to run high-level applications, e.g., training complex neural network models.
 
 Among the basic APIs, some protocols working on Rings share the same logic on some operations processing public operands, 
 so SPU developers pre-implement these APIs as kernels and place them in the common directory. 
-As a result, the ABY3 developer can directly register these kernels through the **regPub2kKernels** function.
+As a result, the ABY3 developer can directly register these kernels through the **regPV2kKernels** function.
 
 .. code-block:: c++
   :caption: Pre-implemented *and_pp* kernel
 
-  class Pub2kAndPP : public BinaryKernel {
+  class AndPP : public BinaryKernel {
    public:
     // kernel name for dynamic binding
     static constexpr char kBindName[] = "and_pp";
@@ -220,14 +220,14 @@ As a result, the ABY3 developer can directly register these kernels through the 
 
 
 .. code-block:: c++
-  :caption: Register *and_pp* kernel in regPub2kKernels function
+  :caption: Register *and_pp* kernel in regPV2kKernels function
 
   ...
-  obj->regKernel<Pub2kMulPP>();
-  obj->regKernel<Pub2kMatMulPP>();
-  // and_pp kernel is implemented as a Pub2kAndPP class
-  obj->regKernel<Pub2kAndPP>();
-  obj->regKernel<Pub2kXorPP>();
+  obj->regKernel<MulPP>();
+  obj->regKernel<MatMulPP>();
+  // and_pp kernel is implemented as a AndPP class
+  obj->regKernel<AndPP>();
+  obj->regKernel<XorPP>();
   ...
 
 Moreover, as we can see that the basic APIs do not have (arithmetic/boolean) secret sharing semantics. 
@@ -290,7 +290,7 @@ The second way is to write and run unittest. Some protocols do not cover all the
 or developers only want to test the functionalities of some specific MPC operations (such as addition and multiplication). 
 In these cases it is more practical to run unittest. SPU developers have construct a general test frameworks in 
 `api_test.cc <https://github.com/secretflow/spu/blob/main/libspu/mpc/api_test.cc>`_ and 
-`ab_api_test.cc <https://github.com/secretflow/spu/blob/main/libspu/mpc/common/ab_api_test.cc>`_. 
+`ab_api_test.cc <https://github.com/secretflow/spu/blob/main/libspu/mpc/ab_api_test.cc>`_. 
 Developers of new protocols need to instantiate these frameworks to test their own protocol functionalities. 
 Developers can refer to the `protocol_test.cc <https://github.com/secretflow/spu/blob/main/libspu/mpc/aby3/protocol_test.cc>`_ 
 file in the aby3 directory to learn how to write their own protocol test files.

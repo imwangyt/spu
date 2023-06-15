@@ -124,7 +124,7 @@ void takeSnapshot(size_t rank, const RuntimeConfig &rt_config,
   dump_file << snapshot.SerializeAsString();
 }
 
-void printProfilingData(spu::HalContext *hctx, const std::string &name,
+void printProfilingData(spu::SPUContext *sctx, const std::string &name,
                         const ExecutionStats &exec_stats,
                         const CommunicationStats &comm_stats) {
   // print overall information
@@ -139,7 +139,7 @@ void printProfilingData(spu::HalContext *hctx, const std::string &name,
   {
     std::map<ActionKey, ActionStats> stats;
 
-    const auto &tracer = GET_TRACER(hctx);
+    const auto &tracer = GET_TRACER(sctx);
     const auto &records = tracer->getProfState()->getRecords();
 
     for (const auto &rec : records) {
@@ -176,28 +176,6 @@ void printProfilingData(spu::HalContext *hctx, const std::string &name,
               comm_stats.send_bytes, comm_stats.send_actions);
 }
 
-void setupTrace(spu::HalContext *hctx, const spu::RuntimeConfig &rt_config) {
-  int64_t tr_flag = 0;
-  // TODO: Support tracing for parallel op execution
-  if (rt_config.enable_action_trace() &&
-      !rt_config.experimental_enable_intra_op_par()) {
-    tr_flag |= TR_LOG;
-  }
-
-  if (rt_config.enable_pphlo_profile()) {
-    tr_flag |= TR_HLO;
-    tr_flag |= TR_REC;
-  }
-
-  if (rt_config.enable_hal_profile()) {
-    tr_flag |= TR_HAL | TR_MPC;
-    tr_flag |= TR_REC;
-  }
-
-  initTrace(hctx->id(), tr_flag);
-  GET_TRACER(hctx)->getProfState()->clearRecords();
-}
-
 void SPUErrorHandler(void *use_data, const char *reason, bool gen_crash_diag) {
   (void)use_data;
   (void)gen_crash_diag;
@@ -218,13 +196,13 @@ void installLLVMErrorHandler() {
 
 }  // namespace
 
-void executeImpl(OpExecutor *executor, spu::HalContext *hctx,
+void executeImpl(OpExecutor *executor, spu::SPUContext *sctx,
                  const ExecutableProto &executable, SymbolTable *env) {
-  setupTrace(hctx, hctx->rt_config());
+  setupTrace(sctx, sctx->config());
   installLLVMErrorHandler();
 
   CommunicationStats comm_stats;
-  comm_stats.reset(hctx->lctx());
+  comm_stats.reset(sctx->lctx());
   ExecutionStats exec_stats;
 
   // prepare inputs from environment.
@@ -238,10 +216,10 @@ void executeImpl(OpExecutor *executor, spu::HalContext *hctx,
   }
 
   // TODO: rename this flag, enable_execution_dump?
-  const RuntimeConfig rt_config = hctx->rt_config();
+  const RuntimeConfig rt_config = sctx->config();
   if (rt_config.enable_processor_dump()) {
-    const bool isRefHal = hctx->lctx() == nullptr;
-    const size_t rank = isRefHal ? 0 : hctx->lctx()->Rank();
+    const bool isRefHal = sctx->lctx() == nullptr;
+    const size_t rank = isRefHal ? 0 : sctx->lctx()->Rank();
     takeSnapshot(rank, rt_config, executable, *env);
   }
 
@@ -274,7 +252,7 @@ void executeImpl(OpExecutor *executor, spu::HalContext *hctx,
       mlir_ctx.enableMultithreading();
       mlir_ctx.enterMultiThreadedExecution();
     }
-    outputs = runRegion(executor, hctx, nullptr, entry_function.getBody(),
+    outputs = runRegion(executor, sctx, nullptr, entry_function.getBody(),
                         inputs, opts);
 
     if (opts.do_parallel) {
@@ -290,18 +268,18 @@ void executeImpl(OpExecutor *executor, spu::HalContext *hctx,
     }
   }
 
-  comm_stats.diff(hctx->lctx());
-  if ((getGlobalTraceFlag(hctx->id()) & TR_REC) != 0) {
-    printProfilingData(hctx, executable.name(), exec_stats, comm_stats);
+  comm_stats.diff(sctx->lctx());
+  if ((getGlobalTraceFlag(sctx->id()) & TR_REC) != 0) {
+    printProfilingData(sctx, executable.name(), exec_stats, comm_stats);
   }
 }
 
-void execute(OpExecutor *executor, spu::HalContext *hctx,
+void execute(OpExecutor *executor, spu::SPUContext *sctx,
              const spu::ExecutableProto &executable, SymbolTable *env) {
-  return executeImpl(executor, hctx, executable, env);
+  return executeImpl(executor, sctx, executable, env);
 }
 
-void execute(OpExecutor *executor, spu::HalContext *hctx,
+void execute(OpExecutor *executor, spu::SPUContext *sctx,
              const std::string &text,
              const std::vector<std::string> &input_names,
              const std::vector<std::string> &output_names, SymbolTable *env) {
@@ -312,7 +290,7 @@ void execute(OpExecutor *executor, spu::HalContext *hctx,
                                         output_names.end()};
   executable.set_code(text);
 
-  return executeImpl(executor, hctx, executable, env);
+  return executeImpl(executor, sctx, executable, env);
 }
 
 }  // namespace spu::device

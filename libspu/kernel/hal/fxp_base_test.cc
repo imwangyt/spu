@@ -19,7 +19,8 @@
 
 #include "libspu/core/parallel_utils.h"
 #include "libspu/kernel/hal/constants.h"
-#include "libspu/kernel/hal/test_util.h"
+#include "libspu/kernel/hal/type_cast.h"
+#include "libspu/kernel/test_util.h"
 
 namespace spu::kernel::hal {
 namespace {
@@ -67,7 +68,7 @@ INSTANTIATE_TEST_SUITE_P(
 // too slowly, disable for now. wait for linalg::matmul optimization.
 TEST_P(FxpMmulTest, Works) {
   // GIVEN
-  HalContext ctx = test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
 
   size_t m = std::get<0>(GetParam());
   size_t n = std::get<1>(GetParam());
@@ -80,10 +81,10 @@ TEST_P(FxpMmulTest, Works) {
   auto t_z = xarrayMMul(x, y);
 
   {  // public
-    Value a = constant(&ctx, x, DT_FXP);
-    Value b = constant(&ctx, y, DT_FXP);
+    Value a = constant(&ctx, x, DT_F32);
+    Value b = constant(&ctx, y, DT_F32);
     Value c = f_mmul(&ctx, a, b);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
     auto z = dump_public_as<float>(&ctx, c);
     EXPECT_TRUE(xt::allclose(t_z, z, 0.01, 0.001)) << t_z << std::endl << z;
@@ -93,16 +94,16 @@ TEST_P(FxpMmulTest, Works) {
     Value a = test::makeValue(&ctx, x, VIS_SECRET);
     Value b = test::makeValue(&ctx, y, VIS_SECRET);
     Value c = f_mmul(&ctx, a, b);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
-    auto z = dump_public_as<float>(&ctx, _s2p(&ctx, c).asFxp());
+    auto z = dump_public_as<float>(&ctx, reveal(&ctx, c));
     EXPECT_TRUE(xt::allclose(t_z, z, 0.01, 0.001)) << t_z << std::endl << z;
   }
 }
 
 TEST(FxpTest, Reciprocal) {
   // GIVEN
-  HalContext ctx = test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
 
   // default fxp bits is 18 for FM64.
   xt::xarray<float> x = {
@@ -113,9 +114,9 @@ TEST(FxpTest, Reciprocal) {
 
   // public reciprocal
   {
-    Value a = constant(&ctx, x, DT_FXP);
+    Value a = constant(&ctx, x, DT_F32);
     Value c = f_reciprocal(&ctx, a);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
     auto y = dump_public_as<float>(&ctx, c);
     EXPECT_TRUE(xt::allclose(1.0F / x, y, 0.001, 0.0001))
@@ -127,9 +128,9 @@ TEST(FxpTest, Reciprocal) {
   {
     Value a = test::makeValue(&ctx, x, VIS_SECRET);
     Value c = f_reciprocal(&ctx, a);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
-    auto y = dump_public_as<float>(&ctx, _s2p(&ctx, c).asFxp());
+    auto y = dump_public_as<float>(&ctx, reveal(&ctx, c));
     EXPECT_TRUE(xt::allclose(1.0F / x, y, 0.001, 0.0001))
         << (1.0 / x) << std::endl
         << y;
@@ -138,17 +139,17 @@ TEST(FxpTest, Reciprocal) {
 
 TEST(FxpTest, Div) {
   // GIVEN
-  HalContext ctx = test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
 
   xt::xarray<float> x = {{1.0, -200000.0, 7000000, -0.5, 314000, 1.5}};
   xt::xarray<float> y = {{1.0, 200000.0, 200000, 100, 3.14, 0.003}};
 
   // public div
   {
-    Value a = constant(&ctx, x, DT_FXP);
-    Value b = constant(&ctx, y, DT_FXP);
+    Value a = constant(&ctx, x, DT_F32);
+    Value b = constant(&ctx, y, DT_F32);
     Value c = f_div(&ctx, a, b);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
     auto z = dump_public_as<float>(&ctx, c);
     EXPECT_TRUE(xt::allclose(x / y, z, 0.001, 0.0001)) << (x / y) << std::endl
@@ -160,9 +161,9 @@ TEST(FxpTest, Div) {
     Value a = test::makeValue(&ctx, x, VIS_SECRET);
     Value b = test::makeValue(&ctx, y, VIS_SECRET);
     Value c = f_div(&ctx, a, b);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
-    auto z = dump_public_as<float>(&ctx, _s2p(&ctx, c).asFxp());
+    auto z = dump_public_as<float>(&ctx, reveal(&ctx, c));
     EXPECT_TRUE(xt::allclose(x / y, z, 0.01, 0.001)) << (x / y) << std::endl
                                                      << z;
   }
@@ -173,9 +174,9 @@ TEST(FxpTest, Div) {
     Value a = test::makeValue(&ctx, x, VIS_SECRET);
     Value b = test::makeValue(&ctx, y, VIS_SECRET);
     Value c = f_div(&ctx, a, b);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
-    auto z = dump_public_as<float>(&ctx, _s2p(&ctx, c).asFxp());
+    auto z = dump_public_as<float>(&ctx, reveal(&ctx, c));
     auto e = x / y;
     auto r = xt::abs(z - e) / e * 100;
     auto mm = xt::minmax(r)();
@@ -185,15 +186,15 @@ TEST(FxpTest, Div) {
 
 TEST(FxpTest, Abs) {
   // GIVEN
-  HalContext ctx = test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
 
   xt::xarray<float> x = {{0.5, -2.0}, {0.9, -1.8}};
 
   // public abs
   {
-    Value a = constant(&ctx, x, DT_FXP);
+    Value a = constant(&ctx, x, DT_F32);
     Value c = f_abs(&ctx, a);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
     auto y = dump_public_as<float>(&ctx, c);
     EXPECT_TRUE(xt::allclose(xt::abs(x), y, 0.01, 0.05))
@@ -205,9 +206,9 @@ TEST(FxpTest, Abs) {
   {
     Value a = test::makeValue(&ctx, x, VIS_SECRET);
     Value c = f_abs(&ctx, a);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
-    auto y = dump_public_as<float>(&ctx, _s2p(&ctx, c).asFxp());
+    auto y = dump_public_as<float>(&ctx, reveal(&ctx, c));
     // low precision
     EXPECT_TRUE(xt::allclose(xt::abs(x), y, 0.1, 0.5))
         << xt::abs(x) << std::endl
@@ -217,15 +218,15 @@ TEST(FxpTest, Abs) {
 
 TEST(FxpTest, Floor) {
   // GIVEN
-  HalContext ctx = test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
 
   xt::xarray<float> x = {{0.5, -0.5}, {-20.0, 31.8}, {0, 5.0}, {-5.0, -31.8}};
 
   // public floor
   {
-    Value a = constant(&ctx, x, DT_FXP);
+    Value a = constant(&ctx, x, DT_F32);
     Value c = f_floor(&ctx, a);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
     auto y = dump_public_as<float>(&ctx, c);
     EXPECT_TRUE(xt::allclose(xt::floor(x), y, 0.01, 0.001))
@@ -237,9 +238,9 @@ TEST(FxpTest, Floor) {
   {
     Value a = test::makeValue(&ctx, x, VIS_SECRET);
     Value c = f_floor(&ctx, a);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
-    auto y = dump_public_as<float>(&ctx, _s2p(&ctx, c).asFxp());
+    auto y = dump_public_as<float>(&ctx, reveal(&ctx, c));
     // low precision
     EXPECT_TRUE(xt::allclose(xt::floor(x), y, 0.01, 0.001))
         << xt::floor(x) << std::endl
@@ -249,15 +250,15 @@ TEST(FxpTest, Floor) {
 
 TEST(FxpTest, Ceil) {
   // GIVEN
-  HalContext ctx = test::makeRefHalContext();
+  SPUContext ctx = test::makeSPUContext();
 
   xt::xarray<float> x = {{0.5, -0.5}, {-20.0, 31.8}, {0, 5.0}, {-5.0, -31.8}};
 
   // public ceil
   {
-    Value a = constant(&ctx, x, DT_FXP);
+    Value a = constant(&ctx, x, DT_F32);
     Value c = f_ceil(&ctx, a);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
     auto y = dump_public_as<float>(&ctx, c);
     EXPECT_TRUE(xt::allclose(xt::ceil(x), y, 0.01, 0.001))
@@ -269,9 +270,9 @@ TEST(FxpTest, Ceil) {
   {
     Value a = test::makeValue(&ctx, x, VIS_SECRET);
     Value c = f_ceil(&ctx, a);
-    EXPECT_EQ(c.dtype(), DT_FXP);
+    EXPECT_EQ(c.dtype(), DT_F32);
 
-    auto y = dump_public_as<float>(&ctx, _s2p(&ctx, c).asFxp());
+    auto y = dump_public_as<float>(&ctx, reveal(&ctx, c));
     // low precision
     EXPECT_TRUE(xt::allclose(xt::ceil(x), y, 0.01, 0.001))
         << xt::ceil(x) << std::endl

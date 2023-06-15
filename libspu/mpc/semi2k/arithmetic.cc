@@ -16,32 +16,19 @@
 
 #include <functional>
 
-#include "libspu/core/trace.h"
 #include "libspu/core/type_util.h"
 #include "libspu/core/vectorize.h"
-#include "libspu/mpc/common/ab_api.h"
+#include "libspu/mpc/ab_api.h"
 #include "libspu/mpc/common/communicator.h"
 #include "libspu/mpc/common/prg_state.h"
-#include "libspu/mpc/common/pub2k.h"
+#include "libspu/mpc/common/pv2k.h"
 #include "libspu/mpc/semi2k/state.h"
 #include "libspu/mpc/semi2k/type.h"
 #include "libspu/mpc/utils/ring_ops.h"
 
 namespace spu::mpc::semi2k {
 
-ArrayRef ZeroA::proc(KernelEvalContext* ctx, size_t size) {
-  SPU_TRACE_MPC_LEAF(ctx, size);
-
-  auto* prg_state = ctx->getState<PrgState>();
-  const auto field = ctx->getState<Z2kState>()->getDefaultField();
-
-  auto [r0, r1] = prg_state->genPrssPair(field, size);
-  return ring_sub(r0, r1).as(makeType<AShrTy>(field));
-}
-
-ArrayRef RandA::proc(KernelEvalContext* ctx, size_t size) {
-  SPU_TRACE_MPC_LEAF(ctx, size);
-
+ArrayRef RandA::proc(KernelEvalContext* ctx, size_t size) const {
   auto* prg_state = ctx->getState<PrgState>();
   const auto field = ctx->getState<Z2kState>()->getDefaultField();
 
@@ -57,12 +44,12 @@ ArrayRef RandA::proc(KernelEvalContext* ctx, size_t size) {
 }
 
 ArrayRef P2A::proc(KernelEvalContext* ctx, const ArrayRef& in) const {
-  SPU_TRACE_MPC_LEAF(ctx, in);
-
   const auto field = in.eltype().as<Ring2k>()->field();
+  auto* prg_state = ctx->getState<PrgState>();
   auto* comm = ctx->getState<Communicator>();
 
-  auto x = zero_a(ctx->caller(), in.numel());
+  auto [r0, r1] = prg_state->genPrssPair(field, in.numel());
+  auto x = ring_sub(r0, r1).as(makeType<AShrTy>(field));
 
   if (comm->getRank() == 0) {
     ring_add_(x, in);
@@ -72,18 +59,60 @@ ArrayRef P2A::proc(KernelEvalContext* ctx, const ArrayRef& in) const {
 }
 
 ArrayRef A2P::proc(KernelEvalContext* ctx, const ArrayRef& in) const {
-  SPU_TRACE_MPC_LEAF(ctx, in);
-
   const auto field = in.eltype().as<Ring2k>()->field();
   auto* comm = ctx->getState<Communicator>();
   auto out = comm->allReduce(ReduceOp::ADD, in, kBindName);
   return out.as(makeType<Pub2kTy>(field));
 }
 
-ArrayRef NotA::proc(KernelEvalContext* ctx, const ArrayRef& in) const {
-  SPU_TRACE_MPC_LEAF(ctx, in);
+ArrayRef A2V::proc(KernelEvalContext* ctx, const ArrayRef& in,
+                   size_t rank) const {
+  auto* comm = ctx->getState<Communicator>();
+  const auto field = in.eltype().as<AShrTy>()->field();
+  auto out_ty = makeType<Priv2kTy>(field, rank);
+  return DISPATCH_ALL_FIELDS(field, "_", [&]() {
+    std::vector<ring2k_t> share(in.numel());
+    pforeach(0, in.numel(),
+             [&](int64_t idx) { share[idx] = in.at<ring2k_t>(idx); });
 
-  auto* comm = ctx->caller()->getState<Communicator>();
+    std::vector<std::vector<ring2k_t>> shares =
+        comm->gather<ring2k_t>(share, rank, "a2v");  // comm => 1, k
+    if (comm->getRank() == rank) {
+      SPU_ENFORCE(shares.size() == comm->getWorldSize());
+      ArrayRef out(out_ty, in.numel());
+      auto _out = ArrayView<ring2k_t>(out);
+      pforeach(0, in.numel(), [&](int64_t idx) {
+        _out[idx] = 0;
+        for (auto& share : shares) {
+          _out[idx] += share[idx];
+        }
+      });
+      return out;
+    } else {
+      return makeConstantArrayRef(out_ty, in.numel());
+    }
+  });
+}
+
+ArrayRef V2A::proc(KernelEvalContext* ctx, const ArrayRef& in) const {
+  const auto* in_ty = in.eltype().as<Priv2kTy>();
+  const size_t owner_rank = in_ty->owner();
+  const auto field = in_ty->field();
+  auto* prg_state = ctx->getState<PrgState>();
+  auto* comm = ctx->getState<Communicator>();
+
+  auto [r0, r1] = prg_state->genPrssPair(field, in.numel());
+  auto x = ring_sub(r0, r1).as(makeType<AShrTy>(field));
+
+  if (comm->getRank() == owner_rank) {
+    ring_add_(x, in);
+  }
+
+  return x.as(makeType<AShrTy>(field));
+}
+
+ArrayRef NotA::proc(KernelEvalContext* ctx, const ArrayRef& in) const {
+  auto* comm = ctx->getState<Communicator>();
 
   // First, let's show negate could be locally processed.
   //   let X = sum(Xi)     % M
@@ -114,8 +143,6 @@ ArrayRef NotA::proc(KernelEvalContext* ctx, const ArrayRef& in) const {
 ////////////////////////////////////////////////////////////////////
 ArrayRef AddAP::proc(KernelEvalContext* ctx, const ArrayRef& lhs,
                      const ArrayRef& rhs) const {
-  SPU_TRACE_MPC_LEAF(ctx, lhs, rhs);
-
   SPU_ENFORCE(lhs.numel() == rhs.numel());
   auto* comm = ctx->getState<Communicator>();
 
@@ -128,8 +155,6 @@ ArrayRef AddAP::proc(KernelEvalContext* ctx, const ArrayRef& lhs,
 
 ArrayRef AddAA::proc(KernelEvalContext* ctx, const ArrayRef& lhs,
                      const ArrayRef& rhs) const {
-  SPU_TRACE_MPC_LEAF(ctx, lhs, rhs);
-
   SPU_ENFORCE(lhs.numel() == rhs.numel());
   SPU_ENFORCE(lhs.eltype() == rhs.eltype());
 
@@ -141,18 +166,14 @@ ArrayRef AddAA::proc(KernelEvalContext* ctx, const ArrayRef& lhs,
 ////////////////////////////////////////////////////////////////////
 ArrayRef MulAP::proc(KernelEvalContext* ctx, const ArrayRef& lhs,
                      const ArrayRef& rhs) const {
-  SPU_TRACE_MPC_LEAF(ctx, lhs, rhs);
-
   return ring_mul(lhs, rhs).as(lhs.eltype());
 }
 
 ArrayRef MulAA::proc(KernelEvalContext* ctx, const ArrayRef& lhs,
                      const ArrayRef& rhs) const {
-  SPU_TRACE_MPC_LEAF(ctx, lhs, rhs);
-
   const auto field = lhs.eltype().as<Ring2k>()->field();
-  auto* comm = ctx->caller()->getState<Communicator>();
-  auto* beaver = ctx->caller()->getState<Semi2kState>()->beaver();
+  auto* comm = ctx->getState<Communicator>();
+  auto* beaver = ctx->getState<Semi2kState>()->beaver();
 
   auto res = ArrayRef(makeType<AShrTy>(field), lhs.numel());
   DISPATCH_ALL_FIELDS(field, kBindName, [&]() {
@@ -177,7 +198,14 @@ ArrayRef MulAA::proc(KernelEvalContext* ctx, const ArrayRef& lhs,
     });
 
     // open x-a & y-b
-    eu = comm->allReduce<U, std::plus>(eu, "open(x-a,y-b)");
+    if (ctx->sctx()->config().experimental_disable_vectorization()) {
+      auto ee = comm->allReduce<U, std::plus>(e, "open(x-a)");
+      auto uu = comm->allReduce<U, std::plus>(u, "open(y-b)");
+      std::copy(ee.begin(), ee.end(), e.begin());
+      std::copy(uu.begin(), uu.end(), u.begin());
+    } else {
+      eu = comm->allReduce<U, std::plus>(eu, "open(x-a,y-b)");
+    }
 
     e = absl::Span<U>(eu.data(), _x.numel());
     u = absl::Span<U>(eu.data() + _x.numel(), _x.numel());
@@ -199,14 +227,11 @@ ArrayRef MulAA::proc(KernelEvalContext* ctx, const ArrayRef& lhs,
 ////////////////////////////////////////////////////////////////////
 ArrayRef MatMulAP::proc(KernelEvalContext* ctx, const ArrayRef& x,
                         const ArrayRef& y, size_t m, size_t n, size_t k) const {
-  SPU_TRACE_MPC_LEAF(ctx, x, y);
   return ring_mmul(x, y, m, n, k).as(x.eltype());
 }
 
 ArrayRef MatMulAA::proc(KernelEvalContext* ctx, const ArrayRef& x,
                         const ArrayRef& y, size_t m, size_t n, size_t k) const {
-  SPU_TRACE_MPC_LEAF(ctx, x, y);
-
   const auto field = x.eltype().as<Ring2k>()->field();
   auto* comm = ctx->getState<Communicator>();
   auto* beaver = ctx->getState<Semi2kState>()->beaver();
@@ -215,12 +240,20 @@ ArrayRef MatMulAA::proc(KernelEvalContext* ctx, const ArrayRef& x,
   auto [a, b, c] = beaver->Dot(field, m, n, k);
 
   // Open x-a & y-b
-  auto res =
-      vectorize({ring_sub(x, a), ring_sub(y, b)}, [&](const ArrayRef& s) {
-        return comm->allReduce(ReduceOp::ADD, s, kBindName);
-      });
-  auto x_a = std::move(res[0]);
-  auto y_b = std::move(res[1]);
+  ArrayRef x_a;
+  ArrayRef y_b;
+
+  if (ctx->sctx()->config().experimental_disable_vectorization()) {
+    x_a = comm->allReduce(ReduceOp::ADD, ring_sub(x, a), "open(x-a)");
+    y_b = comm->allReduce(ReduceOp::ADD, ring_sub(y, b), "open(y-b)");
+  } else {
+    auto res =
+        vectorize({ring_sub(x, a), ring_sub(y, b)}, [&](const ArrayRef& s) {
+          return comm->allReduce(ReduceOp::ADD, s, "open(x-a,y-b)");
+        });
+    x_a = std::move(res[0]);
+    y_b = std::move(res[1]);
+  }
 
   // Zi = Ci + (X - A) dot Bi + Ai dot (Y - B) + <(X - A) dot (Y - B)>
   auto z = ring_add(
@@ -234,8 +267,6 @@ ArrayRef MatMulAA::proc(KernelEvalContext* ctx, const ArrayRef& x,
 
 ArrayRef LShiftA::proc(KernelEvalContext* ctx, const ArrayRef& in,
                        size_t bits) const {
-  SPU_TRACE_MPC_LEAF(ctx, in, bits);
-
   const auto field = in.eltype().as<Ring2k>()->field();
   bits %= SizeOf(field) * 8;
 
@@ -244,7 +275,6 @@ ArrayRef LShiftA::proc(KernelEvalContext* ctx, const ArrayRef& in,
 
 ArrayRef TruncA::proc(KernelEvalContext* ctx, const ArrayRef& x,
                       size_t bits) const {
-  SPU_TRACE_MPC_LEAF(ctx, x, bits);
   auto* comm = ctx->getState<Communicator>();
 
   // TODO: add truncation method to options.
@@ -274,7 +304,6 @@ ArrayRef TruncA::proc(KernelEvalContext* ctx, const ArrayRef& x,
 
 ArrayRef TruncAPr::proc(KernelEvalContext* ctx, const ArrayRef& in,
                         size_t bits) const {
-  SPU_TRACE_MPC_LEAF(ctx, in, bits);
   auto* comm = ctx->getState<Communicator>();
   auto* beaver = ctx->getState<Semi2kState>()->beaver();
   const auto numel = in.numel();

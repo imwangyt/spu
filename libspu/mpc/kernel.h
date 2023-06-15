@@ -14,45 +14,47 @@
 
 #pragma once
 
-#include "libspu/mpc/object.h"
+#include "libspu/core/context.h"
+#include "libspu/core/prelude.h"
 
 namespace spu::mpc {
 
+class RandKernel : public Kernel {
+ public:
+  void evaluate(KernelEvalContext* ctx) const override;
+  virtual ArrayRef proc(KernelEvalContext* ctx, size_t size) const = 0;
+};
+
 class UnaryKernel : public Kernel {
  public:
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(proc(ctx, ctx->getParam<ArrayRef>(0)));
-  }
+  void evaluate(KernelEvalContext* ctx) const override;
   virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in) const = 0;
+};
+
+class RevealToKernel : public Kernel {
+ public:
+  void evaluate(KernelEvalContext* ctx) const override;
+  virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                        size_t rank) const = 0;
 };
 
 class ShiftKernel : public Kernel {
  public:
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(
-        proc(ctx, ctx->getParam<ArrayRef>(0), ctx->getParam<size_t>(1)));
-  }
+  void evaluate(KernelEvalContext* ctx) const override;
   virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
                         size_t bits) const = 0;
 };
 
 class BinaryKernel : public Kernel {
  public:
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(
-        proc(ctx, ctx->getParam<ArrayRef>(0), ctx->getParam<ArrayRef>(1)));
-  }
+  void evaluate(KernelEvalContext* ctx) const override;
   virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& lhs,
                         const ArrayRef& rhs) const = 0;
 };
 
 class MatmulKernel : public Kernel {
  public:
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(proc(ctx, ctx->getParam<ArrayRef>(0),
-                        ctx->getParam<ArrayRef>(1), ctx->getParam<size_t>(2),
-                        ctx->getParam<size_t>(3), ctx->getParam<size_t>(4)));
-  }
+  void evaluate(KernelEvalContext* ctx) const override;
   virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& a,
                         const ArrayRef& b, size_t m, size_t n,
                         size_t k) const = 0;
@@ -60,14 +62,8 @@ class MatmulKernel : public Kernel {
 
 class Conv2DKernel : public Kernel {
  public:
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(proc(ctx, ctx->getParam<ArrayRef>(0),
-                        ctx->getParam<ArrayRef>(1), ctx->getParam<size_t>(2),
-                        ctx->getParam<size_t>(3), ctx->getParam<size_t>(4),
-                        ctx->getParam<size_t>(5), ctx->getParam<size_t>(6),
-                        ctx->getParam<size_t>(7), ctx->getParam<size_t>(8),
-                        ctx->getParam<size_t>(9), ctx->getParam<size_t>(10)));
-  }
+  void evaluate(KernelEvalContext* ctx) const override;
+
   // tensor: NxHxWxC
   // filter: hxwxCxO
   virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& tensor,
@@ -78,10 +74,8 @@ class Conv2DKernel : public Kernel {
 
 class BitrevKernel : public Kernel {
  public:
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(proc(ctx, ctx->getParam<ArrayRef>(0),
-                        ctx->getParam<size_t>(1), ctx->getParam<size_t>(2)));
-  }
+  void evaluate(KernelEvalContext* ctx) const override;
+
   virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
                         size_t start, size_t end) const = 0;
 };
@@ -111,17 +105,29 @@ class TruncAKernel : public ShiftKernel {
 
 class TruncAWithSignKernel : public Kernel {
  public:
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(proc(ctx, ctx->getParam<ArrayRef>(0),
-                        ctx->getParam<size_t>(1), ctx->getParam<bool>(2)));
-  }
+  void evaluate(KernelEvalContext* ctx) const override;
 
+  // TODO: proc function signature changed, so we can not inherit from
+  // TruncAKernel
   virtual bool hasMsbError() const = 0;
-
   virtual TruncLsbRounding lsbRounding() const = 0;
 
   virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in, size_t bits,
                         bool is_positive) const = 0;
+};
+
+class BitSplitKernel : public Kernel {
+ public:
+  void evaluate(KernelEvalContext* ctx) const override;
+  virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                        size_t stride) const = 0;
+};
+
+class CastTypeKernel : public Kernel {
+  void evaluate(KernelEvalContext* ctx) const override;
+
+  virtual ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                        const Type& to_type) const = 0;
 };
 
 }  // namespace spu::mpc

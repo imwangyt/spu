@@ -586,7 +586,7 @@ ArrayRef CheetahDot::Impl::doConv2dOLEForEncryptor(
             for (size_t k = bgn; k < end; ++k) {
               auto ct =
                   this_encryptor->encrypt_symmetric(poly_ntt[i + k]).obj();
-              ct_to_send[bgn] = EncodeSEALObject(ct);
+              ct_to_send[k] = EncodeSEALObject(ct);
             }
           });
 
@@ -737,13 +737,6 @@ CheetahDot::CheetahDot(std::shared_ptr<yacl::link::Context> lctx) {
 }
 
 CheetahDot::~CheetahDot() = default;
-
-CheetahDot::CheetahDot(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
-
-std::unique_ptr<CheetahDot> CheetahDot::Fork() {
-  auto ptr = new CheetahDot(impl_->Fork());
-  return std::unique_ptr<CheetahDot>(ptr);
-}
 
 ArrayRef CheetahDot::DotOLE(const ArrayRef &inp, yacl::link::Context *conn,
                             const Shape3D &dim3, bool is_lhs) {

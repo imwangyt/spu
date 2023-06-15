@@ -15,26 +15,10 @@
 #pragma once
 
 #include "libspu/mpc/kernel.h"
-#include "libspu/mpc/utils/cexpr.h"
 
 namespace spu::mpc::semi2k {
 
-class ZeroA : public Kernel {
- public:
-  static constexpr char kBindName[] = "zero_a";
-
-  ce::CExpr latency() const override { return ce::Const(0); }
-
-  ce::CExpr comm() const override { return ce::Const(0); }
-
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(proc(ctx, ctx->getParam<size_t>(0)));
-  }
-
-  static ArrayRef proc(KernelEvalContext* ctx, size_t size);
-};
-
-class RandA : public Kernel {
+class RandA : public RandKernel {
  public:
   static constexpr char kBindName[] = "rand_a";
 
@@ -42,11 +26,7 @@ class RandA : public Kernel {
 
   ce::CExpr comm() const override { return ce::Const(0); }
 
-  void evaluate(KernelEvalContext* ctx) const override {
-    ctx->setOutput(proc(ctx, ctx->getParam<size_t>(0)));
-  }
-
-  static ArrayRef proc(KernelEvalContext* ctx, size_t size);
+  ArrayRef proc(KernelEvalContext* ctx, size_t size) const override;
 };
 
 class P2A : public UnaryKernel {
@@ -67,6 +47,35 @@ class A2P : public UnaryKernel {
   ce::CExpr latency() const override { return ce::Const(1); }
 
   ce::CExpr comm() const override { return ce::K() * (ce::N() - 1); }
+
+  ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in) const override;
+};
+
+class A2V : public RevealToKernel {
+ public:
+  static constexpr char kBindName[] = "a2v";
+
+  // TODO: communication is unbalanced
+  Kind kind() const override { return Kind::Dynamic; }
+
+  ce::CExpr latency() const override { return ce::Const(1); }
+
+  ce::CExpr comm() const override { return ce::K(); }
+
+  ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in,
+                size_t rank) const override;
+};
+
+class V2A : public UnaryKernel {
+ public:
+  static constexpr char kBindName[] = "v2a";
+
+  // TODO: communication is unbalanced
+  Kind kind() const override { return Kind::Dynamic; }
+
+  ce::CExpr latency() const override { return ce::Const(1); }
+
+  ce::CExpr comm() const override { return ce::K(); }
 
   ArrayRef proc(KernelEvalContext* ctx, const ArrayRef& in) const override;
 };
